@@ -41,7 +41,7 @@ func (c *Conn) writeBasicConf() (err error) {
 	if err = c.writeSetPeerBandwidth(2500000, 2); err != nil {
 		return
 	}
-	if err = c.setAndWriteChunkSize(65536); err != nil {
+	if err = c.setAndWriteChunkSize(4096 * 4); err != nil {
 		return
 	}
 	return
@@ -322,7 +322,7 @@ func (c *Conn) writeConnect(path string) (err error) {
 	if err = c.writeCommand(3, 0, "connect", 1,
 		flvio.AMFMap{
 			{K: "app", V: path},
-			{K: "flashVer", V: "LNX 9,0,124,2"},
+			{K: "flashVer", V: "FMLE/3.0 (compatible; FMSc/1.0)"},
 			{K: "tcUrl", V: getTcURL(c.URL)},
 			{K: "fpad", V: false},
 			{K: "capabilities", V: 15},
