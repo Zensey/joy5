@@ -1,5 +1,9 @@
 package main
 
+type appconfig struct {
+	Accounts map[string]Restream `yaml:"accounts"`
+}
+
 type Endpoint struct {
 	Name    string `json:"name"`
 	URL     string `json:"url"`

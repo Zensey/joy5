@@ -1,14 +1,14 @@
 package main
 
 import (
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/nareix/joy5/cmd/relay/handlers"
 	"gopkg.in/yaml.v3"
 )
-
-type appconfig struct {
-	Accounts map[string]Restream `yaml:"accounts"`
-}
 
 var (
 	config appconfig
@@ -27,5 +27,13 @@ func readConfigs() {
 
 func main() {
 	readConfigs()
-	doPubsubRtmp(":1935")
+	svc, _ := doPubsubRtmp(":1935")
+
+	h := handlers.SetHttpHandlers(svc)
+	go http.ListenAndServe(":8181", h)
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	<-sigs
+	svc.Stop()
 }

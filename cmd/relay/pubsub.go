@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"net"
 	"strings"
@@ -15,8 +16,6 @@ import (
 	"github.com/nareix/joy5/format"
 	"github.com/nareix/joy5/format/rtmp"
 )
-
-const streamPublishPrefix = "/live/"
 
 type gopCacheSnapshot struct {
 	pkts []av.Packet
@@ -256,15 +255,7 @@ func (ss *streams) add(k string) (*stream, func()) {
 }
 
 // add external sub, we are actively restreaming to
-func (s *stream) addSubExt(key string, close <-chan bool, w av.PacketWriter) {
-
-	ss := &streamSub{
-		notify: make(chan struct{}, 1),
-		stop:   make(chan struct{}, 1),
-	}
-
-	s.sub.Store(key, ss)
-	defer s.sub.Delete(key)
+func (s *stream) addSubExt(ss *streamSub, key string, close <-chan bool, w av.PacketWriter) {
 
 	var cursor *gopCacheReadCursor
 	var lastsp *streamPub
@@ -309,72 +300,126 @@ func (s *stream) addSubExt(key string, close <-chan bool, w av.PacketWriter) {
 	}
 }
 
-func activateSub(stream *stream, ep_id, ep_url string) {
-	// log.Println("activateSub",  ep_id, ep_url)
+func activateSubStream(s *stream, ep_id, ep_url string) {
+	log.Println("activateSub", ep_id, ep_url)
+
+	ss := &streamSub{
+		notify: make(chan struct{}, 1),
+		stop:   make(chan struct{}, 1),
+	}
+	s.sub.Store(ep_id, ss)
+	defer s.sub.Delete(ep_id)
 
 	fo := newFormatOpener()
 	var err error
 	var w *format.Writer
-	if w, err = fo.Create(ep_url); err != nil {
-		log.Println("DialFailed", err)
-		return
+	for {
+		select {
+		case <-ss.stop:
+			log.Println("stop substream creation key:", ep_id)
+			return
+		default:
+		}
+
+		if w, err = fo.Create(ep_url); err != nil {
+			log.Println("DialFailed", err)
+			time.Sleep(5 * time.Second)
+		} else {
+			break
+		}
 	}
+
 	nc2 := w.NetConn
 	defer nc2.Close()
 	log.Println("Dial outbound OK")
 
 	log.Println("activate substream", ep_id, ep_url)
-	stream.addSubExt(ep_id, w.Rtmp.CloseNotify(), w)
+	s.addSubExt(ss, ep_id, w.Rtmp.CloseNotify(), w)
 	log.Println("deactivate substream", ep_id, ep_url)
 }
 
-func doPubsubRtmp(listenAddr string) error {
-	lis, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		return err
+type pubsubService struct {
+	streams *streams
+	lis     net.Listener
+}
+
+func (s *pubsubService) StopSubStream(key, subkey string) {
+	stream := s.streams.get(key)
+	if stream == nil {
+		log.Println("no active stream!")
+		return
 	}
+	stream.sub.Range(func(key, value interface{}) bool {
+		if key.(string) == subkey {
+			p := value.(*streamSub)
+			p.stop <- struct{}{}
+		}
+		return true
+	})
+}
+
+func (s *pubsubService) handleRtmpConn(c *rtmp.Conn, nc net.Conn) {
+	streamPublishPrefix := "/live/"
+
+	if !strings.HasPrefix(c.URL.Path, streamPublishPrefix) {
+		return
+	}
+	pubkey := strings.TrimPrefix(c.URL.Path, streamPublishPrefix)
+	log.Println("[HandleConn] pubkey:", pubkey)
+
+	stream, remove := s.streams.add(pubkey)
+	defer remove()
+
+	if c.Publishing {
+		account := config.Accounts[pubkey]
+
+		for epID, ep := range account.Endpoints {
+			if !ep.Enabled {
+				continue
+			}
+			// make local copy to avoid a race
+			epID, epURL := epID, ep.URL
+			go activateSubStream(stream, epID, epURL)
+		}
+
+		stream.setPub(c)
+	}
+}
+
+func doPubsubRtmp(listenAddr string) (svc *pubsubService, err error) {
+	svc = &pubsubService{}
+	svc.lis, err = net.Listen("tcp", listenAddr)
+	if err != nil {
+		return
+	}
+	svc.streams = newStreams()
 
 	s := rtmp.NewServer()
+
 	handleRtmpServerFlags(s)
-
-	streams := newStreams()
-
 	s.LogEvent = func(c *rtmp.Conn, nc net.Conn, e int) {
 		es := rtmp.EventString[e]
 		log.Println(nc.LocalAddr(), nc.RemoteAddr(), es)
 	}
+	s.HandleConn = svc.handleRtmpConn
 
-	s.HandleConn = func(c *rtmp.Conn, nc net.Conn) {
-		if !strings.HasPrefix(c.URL.Path, streamPublishPrefix) {
-			return
-		}
-		pubkey := strings.TrimPrefix(c.URL.Path, streamPublishPrefix)
-		log.Println("[HandleConn] pubkey:", pubkey)
-
-		stream, remove := streams.add(pubkey)
-		defer remove()
-
-		if c.Publishing {
-			account := config.Accounts[pubkey]
-	
-			for epID, ep := range account.Endpoints {
-				if !ep.Enabled {
-					continue
+	go func() {
+		for {
+			nc, err := svc.lis.Accept()
+			if err != nil {
+				if errors.Is(err, net.ErrClosed) {
+					return
 				}
-				epID, epURL := epID, ep.URL // local copy to avoid a race
-				go activateSub(stream, epID, epURL)
+
+				time.Sleep(time.Second)
+				continue
 			}
-
-			stream.setPub(c)
+			go s.HandleNetConn(nc)
 		}
-	}
+	}()
+	return
+}
 
-	for {
-		nc, err := lis.Accept()
-		if err != nil {
-			time.Sleep(time.Second)
-			continue
-		}
-		go s.HandleNetConn(nc)
-	}
+func (s *pubsubService) Stop() {
+	s.lis.Close()
 }
