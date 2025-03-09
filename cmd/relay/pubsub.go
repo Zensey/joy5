@@ -262,6 +262,11 @@ func (s *stream) addSubExt(ss *streamSub, key string, close <-chan bool, w av.Pa
 
 	seqsplit := splitSeqhdr{
 		cb: func(pkt av.Packet) error {
+			// pkt.Metadata = nil
+			// if pkt.Type == av.AACDecoderConfig {
+			// 	fmt.Println("w>>", pkt.Data)
+			// }
+
 			return w.WritePacket(pkt)
 		},
 	}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"log"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -14,13 +16,24 @@ type gopCacheSnapshot struct {
 }
 
 type gopCache struct {
+	mu    sync.Mutex
 	pkts  []av.Packet
 	idx   int
 	curst unsafe.Pointer
+
+	subIdle    bool // subscriber is idle (no more pkt-s)
+	subStarted bool // subscriber state: started / stopped
 }
 
 func (gc *gopCache) put(pkt av.Packet) {
+	// lock b/c publisher consists of 2 goroutines
+	gc.mu.Lock()
+	defer gc.mu.Unlock()
+
 	if pkt.IsKeyFrame {
+		log.Println("put! key", gc.subStarted)
+	}
+	if pkt.IsKeyFrame && gc.subStarted {
 		gc.pkts = []av.Packet{}
 	}
 	gc.pkts = append(gc.pkts, pkt)

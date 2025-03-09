@@ -4,7 +4,7 @@ accounts:
     endpoints:
       451e4604-246e-4790-9cf9-18312aaaefd0:
         name: Telegram
-        url: rtmps://dc4-1.rtmp.t.me/s/2222222222:secretkey
+        url: rtmps://dc4-1.rtmp.t.me/s/2331156095:mZUbaZrImYgCYkwMtDJU7Q
         enabled: true
       7da3748a-c649-4b42-93cc-5369d19508f4:
         name: Facebook

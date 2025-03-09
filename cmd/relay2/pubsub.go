@@ -49,6 +49,7 @@ func (s *stream) addSub(close <-chan bool, w av.PacketWriter) {
 
 	seqsplit := splitSeqhdr{
 		cb: func(pkt av.Packet) error {
+			// log.Printf("%v %-12v", av.PacketTypeString[pkt.Type], pkt.Time)
 			return w.WritePacket(pkt)
 		},
 	}
@@ -66,17 +67,26 @@ func (s *stream) addSub(close <-chan bool, w av.PacketWriter) {
 			if cur != nil {
 				pkts = cursor.advance(cur)
 			}
+
+			sp.gc.subStarted = true
 		}
 
 		if len(pkts) == 0 {
+			sp.gc.subIdle = true
+
 			select {
 			case <-close:
+				log.Println("sub close!")
 				return
 			case <-ss.notify:
+				sp.gc.subIdle = false
 			}
 		} else {
+			sp.gc.subIdle = false
+
 			for _, pkt := range pkts {
 				if err := seqsplit.do(pkt); err != nil {
+					log.Println("sub seqsplit.do!", err)
 					return
 				}
 			}
@@ -204,6 +214,4 @@ func doPubsubRtmp(listenAddr string) error {
 		}
 		go s.HandleNetConn(nc)
 	}
-
-	return nil
 }
