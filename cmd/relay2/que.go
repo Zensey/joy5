@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"log"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -30,9 +29,6 @@ func (gc *gopCache) put(pkt av.Packet) {
 	gc.mu.Lock()
 	defer gc.mu.Unlock()
 
-	if pkt.IsKeyFrame {
-		log.Println("put! key", gc.subStarted)
-	}
 	if pkt.IsKeyFrame && gc.subStarted {
 		gc.pkts = []av.Packet{}
 	}

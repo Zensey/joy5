@@ -7,12 +7,13 @@ import (
 )
 
 const (
-	DefaultMaxInterval = 5 * 60 * time.Second
+	DefaultMaxInterval = 2 * 60 * time.Second
 )
 
-func retry(attempts int, sleep time.Duration, f func() error) (err error) {
-	for i := 0; i < attempts; i++ {
+func retry(maxAttempts int, sleep time.Duration, f func() error) (err error) {
+	for i := 0; i < maxAttempts; i++ {
 		fmt.Println("This is attempt number", i+1)
+
 		// calling the important function
 		err = f()
 		if err != nil {

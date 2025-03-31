@@ -4,10 +4,11 @@ accounts:
     endpoints:
       451e4604-246e-4790-9cf9-18312aaaefd0:
         name: Telegram
-        url: rtmps://dc4-1.rtmp.t.me/s/2331156095:mZUbaZrImYgCYkwMtDJU7Q
+        url_: rtmps://dc4-1.rtmp.t.me/s/2331156095:mZUbaZrImYgCYkwMtDJU7Q
+        url__: rtmps://a.rtmp.youtube.com/live2/9yce-00dk-p8ef-09fy-0yud
+        url: "rtmps://live-api-s.facebook.com:443/rtmp/FB-2056167741535297-0-Ab18halV4YvHSfJiHUcSP0VM"
         enabled: true
       7da3748a-c649-4b42-93cc-5369d19508f4:
         name: Facebook
-        url:
         enabled: false
     

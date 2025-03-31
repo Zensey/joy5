@@ -6,6 +6,8 @@ DONE:
 
 TODO:
 * audio-pub: correct the timeline in case of reconnect
-* note: if ASeqHdr will be required, apply aac.WriteMPEG4AudioConfig() to adts frame config
+* audio-pub: lag -> burst
 
+NOTE:
+* if ASeqHdr will be required, apply aac.WriteMPEG4AudioConfig() to adts frame config
 

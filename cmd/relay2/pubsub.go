@@ -49,7 +49,20 @@ func (s *stream) addSub(close <-chan bool, w av.PacketWriter) {
 
 	seqsplit := splitSeqhdr{
 		cb: func(pkt av.Packet) error {
-			// log.Printf("%v %-12v", av.PacketTypeString[pkt.Type], pkt.Time)
+			
+			if pkt.Type == av.Metadata {
+				log.Println("META>", pkt.Data, pkt.String())
+				// return nil
+			}
+
+			if pkt.Type == av.AACDecoderConfig || pkt.Type == av.H264DecoderConfig {
+				log.Println("pkt", av.PacketTypeString[pkt.Type], pkt.Time)
+			}
+			if pkt.Type == av.AACDecoderConfig {
+				log.Println("pkt", av.PacketTypeString[pkt.Type], pkt.Data)
+			}
+
+			// log.Printf("%-4v %-14v", av.PacketTypeString[pkt.Type], pkt.Time)
 			return w.WritePacket(pkt)
 		},
 	}

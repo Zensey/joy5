@@ -17,12 +17,12 @@ const (
 	adtsHeaderSize = 7
 )
 
-type adts struct {
-	aac []byte
-	cfg aac.MPEG4AudioConfig
+type adtsPkt struct {
+	data   []byte
+	config aac.MPEG4AudioConfig
 }
 
-var track []adts
+var track []adtsPkt
 
 func loadAudioTrackFromFile(fname string) {
 	file, err := os.Open(fname) // Replace with your stream source
@@ -62,7 +62,7 @@ func loadAudioTrackFromFile(fname string) {
 			continue
 		}
 
-		track = append(track, adts{aac: frame, cfg: config})
+		track = append(track, adtsPkt{data: frame, config: config})
 	}
 }
 

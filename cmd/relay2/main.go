@@ -2,22 +2,33 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"log"
+	"strings"
 	"time"
 )
 
 func main() {
-	// loadAudioTrackFromFile("jazz_swing_.aac")
+	destUrl := flag.String("url", "rtmp://localhost:1935/live", "RTMP destination ")
+	destKey := flag.String("key", "", "RTMP destination key")
+	video := flag.String("video", "output.flv", "Video file")
+	accStreamUrl := flag.String("acc-stream", "http://localhost:8000/stream.aac", "ACC stream url")
 
-	video := "winter_wonderland_background_5c64629aa854a95e28d7b95b7860a8f2.flv"
+	flag.Parse()
+	if *destKey == "" {
+		return
+	}
 
 	st := stream{}
-	go st.setPubFromFile(video)
+	go st.setPubFromFile(*video, *accStreamUrl)
 
-	time.Sleep(10 * time.Second)
+	time.Sleep(2 * time.Second)
 
-	downstream := func() error {
-		dest := "rtmps://dc4-1.rtmp.t.me/s/2331156095:mZUbaZrImYgCYkwMtDJU7Q"
+	setupDownstream := func() error {
+		if !strings.HasSuffix(*destUrl, "/") {
+			*destUrl += "/"
+		}
+		dest := *destUrl + *destKey
 
 		fo := newFormatOpener()
 		w, err := fo.Create(dest)
@@ -36,7 +47,7 @@ func main() {
 	}
 
 	for {
-		if err := retry(100, time.Second, downstream); err != nil {
+		if err := retry(1000, time.Second, setupDownstream); err != nil {
 			return
 		}
 	}

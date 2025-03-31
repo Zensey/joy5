@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"net"
 	"net/url"
-	"os"
 	"time"
 )
 
@@ -93,13 +92,13 @@ func (t *Client) Dial(url_ string, flags int) (c *Conn, nc net.Conn, err error) 
 		if nc_, err = t.doDial(host); err != nil {
 			return
 		}
-		f, err := os.OpenFile("c:/users/user/keys", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-		if err != nil {
-			panic(err)
-		}
+		//f, err := os.OpenFile("c:/users/user/keys", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		//if err != nil {
+		//	panic(err)
+		//}
 		nc_ = tls.Client(nc_, &tls.Config{
 			InsecureSkipVerify: true,
-			KeyLogWriter:       f,
+			//KeyLogWriter:       f,
 		})
 	}
 

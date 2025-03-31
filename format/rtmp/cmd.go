@@ -2,6 +2,7 @@ package rtmp
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/nareix/joy5/av"
 	"github.com/nareix/joy5/format/flv"
@@ -35,13 +36,15 @@ func (s Stage) String() string {
 }
 
 func (c *Conn) writeBasicConf() (err error) {
+	log.Println("writeBasicConf", c.URL)
+
 	if err = c.writeWindowAckSize(2500000); err != nil {
 		return
 	}
 	if err = c.writeSetPeerBandwidth(2500000, 2); err != nil {
 		return
 	}
-	if err = c.setAndWriteChunkSize(4096 * 4); err != nil {
+	if err = c.setAndWriteChunkSize(4096); err != nil {
 		return
 	}
 	return
@@ -400,6 +403,9 @@ func (c *Conn) connectPublish() (err error) {
 	}
 
 	transid++
+	
+	connectpath = "live"
+	log.Println("publish>", connectpath)
 	if err = c.writeCommand(4, c.avmsgsid, "publish", transid, nil, publishpath, connectpath); err != nil {
 		return
 	}
