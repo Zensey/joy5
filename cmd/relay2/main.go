@@ -13,11 +13,15 @@ func main() {
 	destKey := flag.String("key", "", "RTMP destination key")
 	video := flag.String("video", "output.flv", "Video file")
 	accStreamUrl := flag.String("acc-stream", "http://localhost:8000/stream.aac", "ACC stream url")
-
 	flag.Parse()
+
 	if *destKey == "" {
 		return
 	}
+	if !strings.HasSuffix(*destUrl, "/") {
+		*destUrl += "/"
+	}
+
 
 	st := stream{}
 	go st.setPubFromFile(*video, *accStreamUrl)
@@ -25,9 +29,6 @@ func main() {
 	time.Sleep(2 * time.Second)
 
 	setupDownstream := func() error {
-		if !strings.HasSuffix(*destUrl, "/") {
-			*destUrl += "/"
-		}
 		dest := *destUrl + *destKey
 
 		fo := newFormatOpener()
