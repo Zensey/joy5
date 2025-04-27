@@ -1,0 +1,13 @@
+accounts:
+  145ddbd8-97fa-4e7f-acc7-c5211d6fcde0:
+    name: AwesomeTV LLC
+    endpoints:
+      451e4604-246e-4790-9cf9-18312aaaefd0:
+        name: Telegram
+        url: rtmps://dc4-1.rtmp.t.me/s/2222222222:secretkey
+        enabled: true
+      7da3748a-c649-4b42-93cc-5369d19508f4:
+        name: Facebook
+        url:
+        enabled: false
+    

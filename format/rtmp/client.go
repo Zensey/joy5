@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/url"
+	"os"
 	"time"
 )
 
@@ -16,6 +17,10 @@ func (t *Client) FromNetConn(nc net.Conn, u *url.URL, flags int) (c *Conn, err e
 	}
 	c_ := NewConn(rw)
 	c_.URL = u
+	// c_.LogChunkDataEvent = func(isRead bool, b []byte) {
+	// 	fmt.Println("LogChunkDataEvent >", len(b), isRead)
+	// 	fmt.Println(hex.EncodeToString(b))
+	// }
 
 	nc.SetDeadline(time.Now().Add(time.Second * 15))
 	if err = c_.Prepare(StageGotPublishOrPlayCommand, flags); err != nil {
@@ -88,7 +93,14 @@ func (t *Client) Dial(url_ string, flags int) (c *Conn, nc net.Conn, err error) 
 		if nc_, err = t.doDial(host); err != nil {
 			return
 		}
-		nc_ = tls.Client(nc_, &tls.Config{InsecureSkipVerify: true})
+		f, err := os.OpenFile("c:/users/user/keys", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		if err != nil {
+			panic(err)
+		}
+		nc_ = tls.Client(nc_, &tls.Config{
+			InsecureSkipVerify: true,
+			KeyLogWriter:       f,
+		})
 	}
 
 	var c_ *Conn
