@@ -19,9 +19,6 @@ type gopCache struct {
 	pkts  []av.Packet
 	idx   int
 	curst unsafe.Pointer
-
-	subIdle    bool // subscriber is idle (no more pkt-s)
-	subStarted bool // subscriber state: started / stopped
 }
 
 func (gc *gopCache) put(pkt av.Packet) {
@@ -29,7 +26,7 @@ func (gc *gopCache) put(pkt av.Packet) {
 	gc.mu.Lock()
 	defer gc.mu.Unlock()
 
-	if pkt.IsKeyFrame && gc.subStarted {
+	if pkt.IsKeyFrame {
 		gc.pkts = []av.Packet{}
 	}
 	gc.pkts = append(gc.pkts, pkt)
@@ -88,6 +85,10 @@ func (m *mergeSeqhdr) do(pkt av.Packet) {
 type splitSeqhdr struct {
 	cb     func(av.Packet) error
 	hdrpkt av.Packet
+}
+
+func (s *splitSeqhdr) reset() {
+	s.hdrpkt = av.Packet{}
 }
 
 func (s *splitSeqhdr) sendmeta(pkt av.Packet) error {

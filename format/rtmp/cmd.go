@@ -403,9 +403,8 @@ func (c *Conn) connectPublish() (err error) {
 	}
 
 	transid++
-	
+
 	connectpath = "live"
-	log.Println("publish>", connectpath)
 	if err = c.writeCommand(4, c.avmsgsid, "publish", transid, nil, publishpath, connectpath); err != nil {
 		return
 	}

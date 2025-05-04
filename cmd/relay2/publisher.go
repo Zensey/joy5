@@ -8,17 +8,20 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
+	"github.com/danielhookx/eventbus"
 	"github.com/nareix/joy5/av"
 	"github.com/nareix/joy5/codec/aac"
 	"github.com/nareix/joy5/format/flv"
 	"github.com/nareix/joy5/format/flv/flvio"
 )
 
-func audioSource(ctx context.Context, ctrl chan string, seqmerge *mergeSeqhdr, t0 time.Time, url string) {
+func audioSource(ctx context.Context, seqmerge *mergeSeqhdr, t0 time.Time, url string, bus eventbus.Eventbus) {
 	defer func() {
 		log.Println("audioSource exit")
 	}()
@@ -35,6 +38,13 @@ func audioSource(ctx context.Context, ctrl chan string, seqmerge *mergeSeqhdr, t
 
 	lag := time.Duration(0)
 	offset := time.Duration(0)
+
+	ctrl_ := make(chan string)
+	dispatchCmd := func(cmd string) {
+		ctrl_ <- cmd
+	}
+	bus.Subscribe("/src", dispatchCmd)
+	defer bus.Unsubscribe("/src", dispatchCmd)
 
 	connectAndCopy := func() error {
 		resp, err := http.Get(url)
@@ -54,16 +64,15 @@ func audioSource(ctx context.Context, ctrl chan string, seqmerge *mergeSeqhdr, t
 				log.Println("audioSource Done!")
 				return nil
 
-			case cmd := <-ctrl:
-				log.Println("cmd", cmd)
-				if cmd == "stop" {
+			case cmd := <-ctrl_:
+				log.Println("audioSource cmd>", cmd)
+				switch cmd {
+				case "stop":
 					skip = true
-				}
-				if cmd == "start" {
+				case "start":
 					t0 = time.Now()
 					lag = time.Duration(0)
 					offset = time.Duration(0)
-
 					skip = false
 				}
 			default:
@@ -72,16 +81,17 @@ func audioSource(ctx context.Context, ctrl chan string, seqmerge *mergeSeqhdr, t
 			err := findADTSHeader(adtsHdr, reader)
 			if err != nil {
 				log.Println("No ADTS header found!")
-				// break
 				return err
 			}
 
-			config, _, framelen, _, err := aac.ParseADTSHeader(adtsHdr)
+			config, hdrlen, framelen, _, err := aac.ParseADTSHeader(adtsHdr)
 			if err != nil {
 				log.Println("ADTS header parse error:", err)
 				log.Println("ADTS:", adtsHdr)
-				// continue
 				return err
+			}
+			if hdrlen != 7 {
+				log.Println("Assert! ADTS header len!", hdrlen)
 			}
 
 			frame := make([]byte, framelen)
@@ -89,13 +99,14 @@ func audioSource(ctx context.Context, ctrl chan string, seqmerge *mergeSeqhdr, t
 			_, err = io.ReadFull(reader, frame[7:])
 			if err != nil {
 				log.Println("Read frame error:", err)
-				// continue
 				return err
 			}
 
 			pkt := av.Packet{}
 			pkt.Type = av.AAC
 			pkt.Time = offset
+			// pkt.Data = getEmptyAAC()
+			// pkt.Data = frame[7:] // adts header is optional!
 			pkt.Data = frame
 
 			pktDuration := aac.PacketDuration(config, nil)
@@ -119,14 +130,26 @@ func audioSource(ctx context.Context, ctrl chan string, seqmerge *mergeSeqhdr, t
 	}
 }
 
-func video(ctx context.Context, ctrl chan string, seqmerge *mergeSeqhdr, fr *os.File, t0 time.Time) {
+func videoSource(ctx context.Context, seqmerge *mergeSeqhdr, vf *os.File, t0 time.Time, bus eventbus.Eventbus) {
+	defer func() {
+		log.Println("videoSource exit")
+	}()
+	log.Println("videoSource start")
+
 	lag := time.Duration(0)
 	offset := time.Duration(0)
 	videoDuration := time.Duration(0)
 
+	controll := make(chan string)
+	dispatchCmd := func(cmd string) {
+		controll <- cmd
+	}
+	bus.Subscribe("/src", dispatchCmd)
+	defer bus.Unsubscribe("/src", dispatchCmd)
+
 	for {
-		fr.Seek(0, 0)
-		r := flv.NewDemuxer(fr)
+		vf.Seek(0, 0)
+		r := flv.NewDemuxer(vf)
 		pktTime := time.Duration(0)
 		pktTimePrev := time.Duration(0)
 
@@ -136,17 +159,18 @@ func video(ctx context.Context, ctrl chan string, seqmerge *mergeSeqhdr, fr *os.
 				log.Println("videoSource Done!")
 				return
 
-			case cmd := <-ctrl:
-				log.Println("video > cmd", cmd)
-				return
-
+			case cmd := <-controll:
+				log.Println("videoSource > cmd", cmd)
+				if cmd == "stop" {
+					return
+				}
 			default:
 			}
 
 			pkt, err := r.ReadPacket()
 			if err != nil {
 				if err != io.EOF {
-					log.Println(err)
+					log.Println("ReadPacket err:", err)
 				}
 				break
 			}
@@ -156,6 +180,10 @@ func video(ctx context.Context, ctrl chan string, seqmerge *mergeSeqhdr, fr *os.
 				m := amf[0].(flvio.AMFMap)
 				duration, _ := m.GetFloat64("duration")
 				videoDuration = durationFromFloat64(duration)
+				continue
+			}
+			// ignore audio track
+			if pkt.Type == av.AAC || pkt.Type == av.AACDecoderConfig {
 				continue
 			}
 
@@ -180,7 +208,7 @@ func video(ctx context.Context, ctrl chan string, seqmerge *mergeSeqhdr, fr *os.
 	}
 }
 
-func (s *stream) setPubFromFile(src string, accStreamUrl string) {
+func (s *stream) setPubFromFile(videoFile, accStreamUrl string, bus eventbus.Eventbus) {
 	defer func() {
 		log.Println("setPubFromFile exit")
 	}()
@@ -205,41 +233,103 @@ func (s *stream) setPubFromFile(src string, accStreamUrl string) {
 		},
 	}
 
-	vfsrc, err := os.Open(src)
+	vf, err := os.Open(videoFile)
 	if err != nil {
 		return
 	}
-	defer vfsrc.Close()
+	defer vf.Close()
 
+	sendMeta := func() {
+		log.Println("sendMeta")
+
+		pkt := av.Packet{}
+		pkt.Type = av.Metadata
+		pkt.Time = 0
+
+		// 30fps 44.1 stereo
+		pkt.Data = []byte{3, 0, 8, 100, 117, 114, 97, 116, 105, 111, 110, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 102, 105, 108, 101, 83, 105, 122, 101, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 119, 105, 100, 116, 104, 0, 64, 158, 0, 0, 0, 0, 0, 0, 0, 6, 104, 101, 105, 103, 104, 116, 0, 64, 144, 224, 0, 0, 0, 0, 0, 0, 12, 118, 105, 100, 101, 111, 99, 111, 100, 101, 99, 105, 100, 0, 64, 28, 0, 0, 0, 0, 0, 0, 0, 13, 118, 105, 100, 101, 111, 100, 97, 116, 97, 114, 97, 116, 101, 0, 64, 163, 136, 0, 0, 0, 0, 0, 0, 9, 102, 114, 97, 109, 101, 114, 97, 116, 101, 0, 64, 62, 0, 0, 0, 0, 0, 0, 0, 12, 97, 117, 100, 105, 111, 99, 111, 100, 101, 99, 105, 100, 0, 64, 36, 0, 0, 0, 0, 0, 0, 0, 13, 97, 117, 100, 105, 111, 100, 97, 116, 97, 114, 97, 116, 101, 0, 64, 100, 0, 0, 0, 0, 0, 0, 0, 15, 97, 117, 100, 105, 111, 115, 97, 109, 112, 108, 101, 114, 97, 116, 101, 0, 64, 229, 136, 128, 0, 0, 0, 0, 0, 15, 97, 117, 100, 105, 111, 115, 97, 109, 112, 108, 101, 115, 105, 122, 101, 0, 64, 48, 0, 0, 0, 0, 0, 0, 0, 13, 97, 117, 100, 105, 111, 99, 104, 97, 110, 110, 101, 108, 115, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 6, 115, 116, 101, 114, 101, 111, 1, 1, 0, 3, 50, 46, 49, 1, 0, 0, 3, 51, 46, 49, 1, 0, 0, 3, 52, 46, 48, 1, 0, 0, 3, 52, 46, 49, 1, 0, 0, 3, 53, 46, 49, 1, 0, 0, 3, 55, 46, 49, 1, 0, 0, 7, 101, 110, 99, 111, 100, 101, 114, 2, 0, 41, 111, 98, 115, 45, 111, 117, 116, 112, 117, 116, 32, 109, 111, 100, 117, 108, 101, 32, 40, 108, 105, 98, 111, 98, 115, 32, 118, 101, 114, 115, 105, 111, 110, 32, 51, 49, 46, 48, 46, 49, 41, 0, 0, 9}
+		seqmerge.do(pkt)
+	}
+
+	sendMeta()
 	t0 := time.Now()
-	ctrA := make(chan string)
-	ctrV := make(chan string)
+	go audioSource(ctx, &seqmerge, t0, accStreamUrl, bus)
+	go videoSource(ctx, &seqmerge, vf, t0, bus)
 
-	pkt := av.Packet{}
-	pkt.Type = av.Metadata
-	pkt.Time = 0
+	restartAV := func() {
+		log.Println("restart AV (media sources) !")
+		bus.Publish("/src", "stop")
 
-	// 30fps 44.1 stereo
-	pkt.Data = []byte{3, 0, 8, 100, 117, 114, 97, 116, 105, 111, 110, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 102, 105, 108, 101, 83, 105, 122, 101, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 119, 105, 100, 116, 104, 0, 64, 158, 0, 0, 0, 0, 0, 0, 0, 6, 104, 101, 105, 103, 104, 116, 0, 64, 144, 224, 0, 0, 0, 0, 0, 0, 12, 118, 105, 100, 101, 111, 99, 111, 100, 101, 99, 105, 100, 0, 64, 28, 0, 0, 0, 0, 0, 0, 0, 13, 118, 105, 100, 101, 111, 100, 97, 116, 97, 114, 97, 116, 101, 0, 64, 163, 136, 0, 0, 0, 0, 0, 0, 9, 102, 114, 97, 109, 101, 114, 97, 116, 101, 0, 64, 62, 0, 0, 0, 0, 0, 0, 0, 12, 97, 117, 100, 105, 111, 99, 111, 100, 101, 99, 105, 100, 0, 64, 36, 0, 0, 0, 0, 0, 0, 0, 13, 97, 117, 100, 105, 111, 100, 97, 116, 97, 114, 97, 116, 101, 0, 64, 100, 0, 0, 0, 0, 0, 0, 0, 15, 97, 117, 100, 105, 111, 115, 97, 109, 112, 108, 101, 114, 97, 116, 101, 0, 64, 229, 136, 128, 0, 0, 0, 0, 0, 15, 97, 117, 100, 105, 111, 115, 97, 109, 112, 108, 101, 115, 105, 122, 101, 0, 64, 48, 0, 0, 0, 0, 0, 0, 0, 13, 97, 117, 100, 105, 111, 99, 104, 97, 110, 110, 101, 108, 115, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 6, 115, 116, 101, 114, 101, 111, 1, 1, 0, 3, 50, 46, 49, 1, 0, 0, 3, 51, 46, 49, 1, 0, 0, 3, 52, 46, 48, 1, 0, 0, 3, 52, 46, 49, 1, 0, 0, 3, 53, 46, 49, 1, 0, 0, 3, 55, 46, 49, 1, 0, 0, 7, 101, 110, 99, 111, 100, 101, 114, 2, 0, 41, 111, 98, 115, 45, 111, 117, 116, 112, 117, 116, 32, 109, 111, 100, 117, 108, 101, 32, 40, 108, 105, 98, 111, 98, 115, 32, 118, 101, 114, 115, 105, 111, 110, 32, 51, 49, 46, 48, 46, 49, 41, 0, 0, 9}
-	seqmerge.do(pkt)
+		time.Sleep(1 * time.Second)
+		bus.Publish("/sub", "reset")
+		time.Sleep(1 * time.Second)
 
-	go audioSource(ctx, ctrA, &seqmerge, t0, accStreamUrl)
-	go video(ctx, ctrV, &seqmerge, vfsrc, t0)
+		sendMeta()
+		t0 = time.Now()
+		go videoSource(ctx, &seqmerge, vf, t0, bus)
+		bus.Publish("/src", "start")
+	}
+
+	cmd_ := make(chan string)
+	bus.Subscribe("/pub", func(cmd string) {
+		cmd_ <- cmd
+	})
+
+	ticker := time.NewTicker(24 * 60 * time.Minute) // rollover timer for infinite stream
+	for {
+		select {
+		case cmd := <-cmd_:
+			if cmd == "av:restart" {
+				restartAV()
+			}
+		case <-ticker.C:
+			restartAV()
+		}
+	}
+}
+
+func (st *stream) setupDownstreams(destUrl, destKey string, bus eventbus.Eventbus) error {
+	runDownstreams := func() {
+		log.Println("runDownstreams >")
+		ctx, cancelFunc := context.WithCancel(context.Background())
+		defer cancelFunc()
+
+		wg := sync.WaitGroup{}
+		for _, key := range strings.Split(destKey, ",") {
+			wg.Add(1)
+			go func(key string) {
+				defer wg.Done()
+
+				if err := st.setupDownstream(destUrl+key, bus, ctx); err != nil {
+					log.Println("st.setupDownstream", err)
+					cancelFunc()
+				}
+			}(key)
+		}
+		wg.Wait()
+	}
 
 	for {
-		time.Sleep(24 * 60 * time.Minute) // 4h rollover
-		ctrV <- "stop"
-		ctrA <- "stop"
+		runDownstreams()
 
-		// wait for sub idle, i.e. output que is empty
-		log.Println("wait for sub idle")
-		for !sp.gc.subIdle {
-			log.Println("wait >")
-			time.Sleep(10 * time.Millisecond)
-		}
-
-		t0 = time.Now()
-		go video(ctx, ctrV, &seqmerge, vfsrc, t0)
-		ctrA <- "start"
+		bus.Publish("/pub", "av:restart")
+		time.Sleep(2 * time.Second)
 	}
+}
+
+func (st *stream) setupDownstream(dest string, bus eventbus.Eventbus, ctx context.Context) error {
+	fo := newFormatOpener()
+	w, err := fo.Create(dest)
+	if err != nil {
+		log.Println("Dial Failed", err)
+		return err
+	}
+	log.Println("Dial OK!", dest)
+
+	c2 := w.Rtmp
+	nc2 := w.NetConn
+	defer nc2.Close()
+
+	err = st.addSub(c2.CloseNotify(), c2, bus, ctx)
+	return err
 }

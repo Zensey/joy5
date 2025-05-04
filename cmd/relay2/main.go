@@ -1,11 +1,13 @@
 package main
 
 import (
-	"errors"
 	"flag"
-	"log"
+	"os"
+	"os/signal"
 	"strings"
-	"time"
+	"syscall"
+
+	"github.com/danielhookx/eventbus"
 )
 
 func main() {
@@ -22,34 +24,13 @@ func main() {
 		*destUrl += "/"
 	}
 
+	bus := eventbus.New()
 
 	st := stream{}
-	go st.setPubFromFile(*video, *accStreamUrl)
+	go st.setPubFromFile(*video, *accStreamUrl, bus)
+	go st.setupDownstreams(*destUrl, *destKey, bus)
 
-	time.Sleep(2 * time.Second)
-
-	setupDownstream := func() error {
-		dest := *destUrl + *destKey
-
-		fo := newFormatOpener()
-		w, err := fo.Create(dest)
-		if err != nil {
-			log.Println("Dial Failed", err)
-			return err
-		}
-		log.Println("Dial OK!", dest)
-
-		c2 := w.Rtmp
-		nc2 := w.NetConn
-		defer nc2.Close()
-
-		st.addSub(c2.CloseNotify(), c2)
-		return errors.New("disconnect")
-	}
-
-	for {
-		if err := retry(1000, time.Second, setupDownstream); err != nil {
-			return
-		}
-	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	<-sigs
 }

@@ -127,3 +127,7 @@ func findADTSHeader(buf []byte, reader *bufio.Reader) error {
 	}
 	return errors.New("adts not found")
 }
+
+func getEmptyAAC() []byte {
+	return []byte{33, 16, 4, 96, 140, 28}
+}

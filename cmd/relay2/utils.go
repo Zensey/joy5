@@ -6,9 +6,11 @@ import (
 	"time"
 )
 
-const (
-	DefaultMaxInterval = 2 * 60 * time.Second
-)
+const defaultMaxInterval = 2 * 60 * time.Second
+
+// var (
+// 	errOK = errors.New("")
+// )
 
 func retry(maxAttempts int, sleep time.Duration, f func() error) (err error) {
 	for i := 0; i < maxAttempts; i++ {
@@ -21,11 +23,11 @@ func retry(maxAttempts int, sleep time.Duration, f func() error) (err error) {
 			log.Println("sleeping for: ", sleep.String())
 			time.Sleep(sleep)
 
-			if sleep < DefaultMaxInterval {
+			if sleep < defaultMaxInterval {
 				sleep *= 2
 			}
-			if sleep > DefaultMaxInterval {
-				sleep = DefaultMaxInterval
+			if sleep > defaultMaxInterval {
+				sleep = defaultMaxInterval
 			}
 			continue
 		}
