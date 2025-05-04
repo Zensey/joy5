@@ -1,3 +1,9 @@
+## About
+
+The main aim of relay2 project is 24/7 endless broadcast of a music stream from
+the Icecast2 broadcast server accompanied by a looped video. All is done w/o transcoding, so
+the hardware requirements are low.
+
 ## Usage:
 
     ./relay2 -url=rtmp://a.rtmp.youtube.com/live2/ -acc-stream=http://myserver:8000/mystream.aac -key=1111-1111-1111-1111-1111,2222-2222-2222-2222-2222
